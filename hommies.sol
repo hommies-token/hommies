@@ -1,4 +1,18 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+
+// Import the Uniswap V2 interfaces
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 
 contract Hommies is
     ERC20,
@@ -10,7 +24,7 @@ contract Hommies is
 {
     uint8 public buyTax = 4;
     uint8 public sellTax = 8;
-    uint8 public transferTax = 0;
+    uint8 public transferTax = 10;
 
     uint256 public initialSupply = 700000000;
     uint256 public maxSupply = 10000000000;
@@ -19,7 +33,7 @@ contract Hommies is
     address public revenueWallet;
     address public uniswapPair;
 
-    uint256 public revenueThreshold = 10000000;
+    uint256 public revenueThreshold = 1000000;
 
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
@@ -27,16 +41,16 @@ contract Hommies is
     IUniswapV2Factory private uniswapFactory;
     IUniswapV2Pair private uniswapV2Pair;
 
-    constructor(
-        address _rewardWallet,
-        address _revenueWallet,
-        address _minterWallet
-    ) ERC20("Hommies", "HOMMIES") Ownable(msg.sender) ERC20Permit("Hommies") {
+    constructor(address _rewardWallet, address _revenueWallet)
+        ERC20("Hommies", "HOMMIES")
+        Ownable(msg.sender)
+        ERC20Permit("Hommies")
+    {
         require(_rewardWallet != address(0), "Invalid Reward Wallet Address");
         require(_revenueWallet != address(0), "Invalid Revenue Wallet Address");
 
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _grantRole(MINTER_ROLE, _minterWallet);
+        _grantRole(MINTER_ROLE, msg.sender);
 
         rewardWallet = _rewardWallet;
         revenueWallet = _revenueWallet;
@@ -55,8 +69,7 @@ contract Hommies is
         _mint(msg.sender, initialSupply * 10**decimals());
     }
 
-    function mint(address to, uint256 amount) public whenNotPaused {
-        require(hasRole(MINTER_ROLE, msg.sender), "Caller is not a minter");
+    function mint(address to, uint256 amount) public whenNotPaused onlyRole(MINTER_ROLE) {
         require(to != address(0), "Invalid Wallet Address");
         require(
             totalSupply() + amount <= maxSupply * 10**decimals(),
@@ -65,29 +78,17 @@ contract Hommies is
         _mint(to, amount);
     }
 
-    function setRewardWallet(address _rewardWallet) public {
-        require(
-            hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
-            "Caller is not an admin"
-        );
+    function setRewardWallet(address _rewardWallet) public onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_rewardWallet != address(0), "Invalid Wallet Address");
         rewardWallet = _rewardWallet;
     }
 
-    function setRevenueWallet(address _revenueWallet) public {
-        require(
-            hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
-            "Caller is not an admin"
-        );
+    function setRevenueWallet(address _revenueWallet) public onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_revenueWallet != address(0), "Invalid Wallet Address");
         revenueWallet = _revenueWallet;
     }
 
-    function setThresholdLimit(uint256 _limit) public {
-        require(
-            hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
-            "Caller is not an admin"
-        );
+    function setThresholdLimit(uint256 _limit) public onlyRole(DEFAULT_ADMIN_ROLE) {
         revenueThreshold = _limit;
     }
 
@@ -95,11 +96,7 @@ contract Hommies is
         uint8 _buyTax,
         uint8 _sellTax,
         uint8 _transferTax
-    ) external {
-        require(
-            hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
-            "Caller is not an admin"
-        );
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         buyTax = _buyTax;
         sellTax = _sellTax;
         transferTax = _transferTax;
@@ -140,10 +137,7 @@ contract Hommies is
     ) internal whenNotPaused returns (bool) {
         require(sender != address(0), "Invalid Address");
         require(recipient != address(0), "Invalid Address");
-        require(
-            amount > 0,
-            "Amount should be greater than zero for transaction."
-        );
+        require(amount > 0, "Amount should be greater than zero for transaction.");
 
         uint256 totalTax = 0;
         uint8 taxRate = transferTax;
@@ -224,7 +218,7 @@ contract Hommies is
         view
         returns (uint256 minAmountOut)
     {
-        require(slippage <= 10000, "Slippage too high"); // Slippage cannot be more than 100%
+        require(slippage <= 5000, "Slippage too high"); // Slippage cannot be more than 50%
 
         (uint112 reserve0, uint112 reserve1, ) = uniswapV2Pair.getReserves();
         address token0 = uniswapV2Pair.token0();
@@ -251,29 +245,17 @@ contract Hommies is
         minAmountOut = rawAmountOut - slippageAmount;
     }
 
-    function pauseContract() public whenNotPaused returns (bool) {
-        require(
-            hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
-            "Caller is not an admin"
-        );
+    function pauseContract() public whenNotPaused onlyRole(DEFAULT_ADMIN_ROLE) returns (bool) {
         _pause();
         return true;
     }
 
-    function unpauseContract() public whenPaused returns (bool) {
-        require(
-            hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
-            "Caller is not an admin"
-        );
+    function unpauseContract() public whenPaused onlyRole(DEFAULT_ADMIN_ROLE) returns (bool) {
         _unpause();
         return true;
     }
 
-    function withdrawTokens(address _tokenContract) external whenNotPaused {
-        require(
-            hasRole(DEFAULT_ADMIN_ROLE, msg.sender),
-            "Caller is not an admin"
-        );
+    function withdrawTokens(address _tokenContract) external whenNotPaused onlyRole(DEFAULT_ADMIN_ROLE) {
         IERC20 token = IERC20(_tokenContract);
         uint256 tokenBalance = token.balanceOf(address(this));
         require(token.transfer(revenueWallet, tokenBalance), "Transfer failed");
